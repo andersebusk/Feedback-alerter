@@ -41,8 +41,7 @@ def get_vessels_to_alert(conn):
               AND COALESCE(is_deleted, FALSE) = FALSE
             GROUP BY vessel_name
             HAVING
-                CURRENT_DATE - MAX(feedback_received_at::date) IN (25, 28, 30)
-                OR CURRENT_DATE - MAX(feedback_received_at::date) > 30
+                CURRENT_DATE - MAX(feedback_received_at::date) >=7
             ORDER BY vessel_name;
         """)
         return cur.fetchall()
