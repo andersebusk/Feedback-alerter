@@ -1,32 +1,64 @@
 import os
 import psycopg2
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+import requests
 from datetime import date
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 ALERT_TO_EMAIL = os.environ["ALERT_TO_EMAIL"]
-ALERT_FROM_EMAIL = os.environ["ALERT_FROM_EMAIL"]
-SMTP_HOST = os.environ["SMTP_HOST"]
-SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
-SMTP_USER = os.environ["SMTP_USER"]
-SMTP_PASS = os.environ["SMTP_PASS"]
-SMTP_USE_TLS = os.environ.get("SMTP_USE_TLS", "true").lower() == "true"
+GRAPH_FROM_EMAIL = os.environ["GRAPH_FROM_EMAIL"]
+
+TENANT_ID = os.environ["TENANT_ID"]
+CLIENT_ID = os.environ["CLIENT_ID"]
+CLIENT_SECRET = os.environ["CLIENT_SECRET"]
+
+
+def get_access_token() -> str:
+    token_url = f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token"
+
+    data = {
+        "client_id": CLIENT_ID,
+        "client_secret": CLIENT_SECRET,
+        "scope": "https://graph.microsoft.com/.default",
+        "grant_type": "client_credentials",
+    }
+
+    response = requests.post(token_url, data=data, timeout=30)
+    response.raise_for_status()
+
+    token_data = response.json()
+    return token_data["access_token"]
 
 
 def send_email(subject: str, body: str, recipients: list[str]) -> None:
-    msg = MIMEMultipart()
-    msg["From"] = ALERT_FROM_EMAIL
-    msg["To"] = ", ".join(recipients)
-    msg["Subject"] = subject
-    msg.attach(MIMEText(body, "plain"))
+    access_token = get_access_token()
 
-    with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
-        if SMTP_USE_TLS:
-            server.starttls()
-        server.login(SMTP_USER, SMTP_PASS)
-        server.sendmail(ALERT_FROM_EMAIL, recipients, msg.as_string())
+    url = f"https://graph.microsoft.com/v1.0/users/{GRAPH_FROM_EMAIL}/sendMail"
+
+    payload = {
+        "message": {
+            "subject": subject,
+            "body": {
+                "contentType": "Text",
+                "content": body,
+            },
+            "toRecipients": [
+                {"emailAddress": {"address": email}} for email in recipients
+            ],
+        },
+        "saveToSentItems": True,
+    }
+
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+    }
+
+    response = requests.post(url, headers=headers, json=payload, timeout=30)
+
+    if response.status_code not in (200, 202):
+        raise Exception(
+            f"Graph sendMail failed: {response.status_code} {response.text}"
+        )
 
 
 def get_vessels_to_alert(conn):
@@ -41,7 +73,7 @@ def get_vessels_to_alert(conn):
               AND COALESCE(is_deleted, FALSE) = FALSE
             GROUP BY vessel_name
             HAVING
-                CURRENT_DATE - MAX(feedback_received_at::date) >=7
+                CURRENT_DATE - MAX(feedback_received_at::date) >= 7
             ORDER BY vessel_name;
         """)
         return cur.fetchall()
