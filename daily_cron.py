@@ -122,11 +122,19 @@ def build_digest_email(overdue_vessels, escalated_vessels, critical_vessels):
         <p style='font-size:13px;color:#555;margin-top:2px;'>{description}</p>
         """
 
+    inactive_link = """
+        <p style='font-size:13px;color:#555;margin-top:8px;'>
+            Do you want to change any of these vessels to inactive?
+            <a href='https://feedback-report-generator.onrender.com/vessel-inactive'
+               style='color:#003366;'>Use the following link</a>.
+        </p>
+    """
+
     return f"""
     <html>
     <body style='font-family:Arial,sans-serif;color:#333;max-width:700px;margin:0 auto;padding:20px;'>
         <h2 style='color:#003366;border-bottom:2px solid #003366;padding-bottom:8px;'>
-            Daily Vessel Follow-up
+            Daily Vessel Follow-up Digest
         </h2>
         <p>Good morning,<br>Here is your daily summary of vessels requiring attention.</p>
 
@@ -143,7 +151,7 @@ def build_digest_email(overdue_vessels, escalated_vessels, critical_vessels):
 
         {section_header('#e68a00', 'Escalated — No Response to Outreach', len(escalated_vessels),
             'Outreach was sent but no data received within 3 business days.')}
-        <table style='width:100%;border-collapse:collapse;font-size:14px;margin-bottom:24px;'>
+        <table style='width:100%;border-collapse:collapse;font-size:14px;margin-bottom:8px;'>
             <tr style='background:#f5f5f5;'>
                 <th style='text-align:left;padding:8px;border-bottom:2px solid #ddd;'>Responsible</th>
                 <th style='text-align:left;padding:8px;border-bottom:2px solid #ddd;'>Vessel</th>
@@ -151,10 +159,12 @@ def build_digest_email(overdue_vessels, escalated_vessels, critical_vessels):
             </tr>
             {vessel_rows(escalated_vessels)}
         </table>
+        {inactive_link}
+        <br>
 
         {section_header('#660000', 'Critical — Follow-up Also Ignored', len(critical_vessels),
             'Follow-up was sent but still no data received. Further action required.')}
-        <table style='width:100%;border-collapse:collapse;font-size:14px;margin-bottom:24px;'>
+        <table style='width:100%;border-collapse:collapse;font-size:14px;margin-bottom:8px;'>
             <tr style='background:#f5f5f5;'>
                 <th style='text-align:left;padding:8px;border-bottom:2px solid #ddd;'>Responsible</th>
                 <th style='text-align:left;padding:8px;border-bottom:2px solid #ddd;'>Vessel</th>
@@ -162,6 +172,14 @@ def build_digest_email(overdue_vessels, escalated_vessels, critical_vessels):
             </tr>
             {vessel_rows(critical_vessels)}
         </table>
+        {inactive_link}
+        <br>
+
+        <p style='font-size:13px;color:#555;'>
+            You can see a full overview of all vessels here:
+            <a href='https://feedback-report-generator.onrender.com/vessel-overview'
+               style='color:#003366;'>Vessel Overview</a>
+        </p>
 
         <p style='font-size:12px;color:#aaa;border-top:1px solid #eee;padding-top:12px;'>
             This is an automated message from the Marine Fluid Technology data tracking system.
