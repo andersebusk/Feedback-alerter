@@ -23,7 +23,9 @@ def get_access_token() -> str:
     }
 
     response = requests.post(token_url, data=data, timeout=30)
-    response.raise_for_status()
+
+    if not response.ok:
+        raise Exception(f"Token request failed: {response.status_code} {response.text}")
 
     token_data = response.json()
     return token_data["access_token"]
