@@ -126,7 +126,7 @@ def build_digest_email(overdue_vessels, escalated_vessels, critical_vessels):
     <html>
     <body style='font-family:Arial,sans-serif;color:#333;max-width:700px;margin:0 auto;padding:20px;'>
         <h2 style='color:#003366;border-bottom:2px solid #003366;padding-bottom:8px;'>
-            Daily Vessel Follow-up Digest
+            Daily Vessel Follow-up
         </h2>
         <p>Good morning,<br>Here is your daily summary of vessels requiring attention.</p>
 
