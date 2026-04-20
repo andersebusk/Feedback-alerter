@@ -159,8 +159,8 @@ def main():
         return
 
     # Run mailbox parser first so latest email dates are in the DB
-    print("Running mailbox parser...")
-    mailbox_parser.main()
+    # print("Running mailbox parser...")
+    # mailbox_parser.main()
 
     print(f"[{now}] Starting daily status evaluation...")
 
