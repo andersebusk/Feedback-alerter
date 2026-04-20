@@ -3,6 +3,8 @@ import re
 import requests
 import psycopg2
 from datetime import datetime, timezone
+from dotenv import load_dotenv
+load_dotenv()
 
 # ---------------------------------------------------------------------------
 # CONFIG — set these as environment variables on Render

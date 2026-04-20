@@ -4,6 +4,8 @@ import psycopg2
 import psycopg2.extras
 import mailbox_parser
 from datetime import datetime, timezone, timedelta
+from dotenv import load_dotenv
+load_dotenv()
 
 # ---------------------------------------------------------------------------
 # CONFIG — set these as environment variables on Render
@@ -39,9 +41,14 @@ def calendar_days_since(dt):
     if dt is None:
         return None
     now = datetime.now(timezone.utc)
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return (now - dt).days
+    # Handle both date and datetime objects
+    if isinstance(dt, datetime):
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return (now - dt).days
+    else:
+        # It's a date object, compare dates directly
+        return (now.date() - dt).days
 
 # ---------------------------------------------------------------------------
 # GRAPH API: Get access token
@@ -100,49 +107,65 @@ def build_digest_email(overdue_vessels, escalated_vessels, critical_vessels):
             </tr>"""
         return rows
 
+    def section_header(color, title, count, description):
+        return f"""
+        <table style='width:100%;border-collapse:collapse;margin-bottom:4px;'>
+            <tr>
+                <td style='width:14px;'>
+                    <div style='width:12px;height:12px;background:{color};border-radius:2px;'></div>
+                </td>
+                <td style='padding-left:8px;'>
+                    <span style='font-size:16px;font-weight:bold;color:{color};'>{title} ({count} vessels)</span>
+                </td>
+            </tr>
+        </table>
+        <p style='font-size:13px;color:#555;margin-top:2px;'>{description}</p>
+        """
+
     return f"""
     <html>
-    <body style='font-family:Arial,sans-serif;color:#333;max-width:700px;'>
-        <h2 style='color:#003366;'>Daily Vessel Follow-up Digest</h2>
+    <body style='font-family:Arial,sans-serif;color:#333;max-width:700px;margin:0 auto;padding:20px;'>
+        <h2 style='color:#003366;border-bottom:2px solid #003366;padding-bottom:8px;'>
+            Daily Vessel Follow-up Digest
+        </h2>
         <p>Good morning,<br>Here is your daily summary of vessels requiring attention.</p>
 
-        <h3 style='color:#cc0000;'>🔴 Overdue — Needs Outreach ({len(overdue_vessels)} vessels)</h3>
-        <p style='font-size:13px;color:#555;'>Data has not been received in 28+ days and no outreach has been sent.</p>
-        <table style='width:100%;border-collapse:collapse;font-size:14px;'>
+        {section_header('#cc0000', 'Overdue — Needs Outreach', len(overdue_vessels),
+            'Data has not been received in 28+ days and no outreach has been sent.')}
+        <table style='width:100%;border-collapse:collapse;font-size:14px;margin-bottom:24px;'>
             <tr style='background:#f5f5f5;'>
-                <th style='text-align:left;padding:8px;'>Responsible</th>
-                <th style='text-align:left;padding:8px;'>Vessel</th>
-                <th style='text-align:left;padding:8px;'>Days Since Last Feedback</th>
+                <th style='text-align:left;padding:8px;border-bottom:2px solid #ddd;'>Responsible</th>
+                <th style='text-align:left;padding:8px;border-bottom:2px solid #ddd;'>Vessel</th>
+                <th style='text-align:left;padding:8px;border-bottom:2px solid #ddd;'>Days Since Last Feedback</th>
             </tr>
             {vessel_rows(overdue_vessels)}
         </table>
 
-        <br>
-        <h3 style='color:#e68a00;'>🟡 Escalated — No Response to Outreach ({len(escalated_vessels)} vessels)</h3>
-        <p style='font-size:13px;color:#555;'>Outreach was sent but no data received within 3 business days.</p>
-        <table style='width:100%;border-collapse:collapse;font-size:14px;'>
+        {section_header('#e68a00', 'Escalated — No Response to Outreach', len(escalated_vessels),
+            'Outreach was sent but no data received within 3 business days.')}
+        <table style='width:100%;border-collapse:collapse;font-size:14px;margin-bottom:24px;'>
             <tr style='background:#f5f5f5;'>
-                <th style='text-align:left;padding:8px;'>Responsible</th>
-                <th style='text-align:left;padding:8px;'>Vessel</th>
-                <th style='text-align:left;padding:8px;'>Days Since Outreach Sent</th>
+                <th style='text-align:left;padding:8px;border-bottom:2px solid #ddd;'>Responsible</th>
+                <th style='text-align:left;padding:8px;border-bottom:2px solid #ddd;'>Vessel</th>
+                <th style='text-align:left;padding:8px;border-bottom:2px solid #ddd;'>Days Since Outreach Sent</th>
             </tr>
             {vessel_rows(escalated_vessels)}
         </table>
 
-        <br>
-        <h3 style='color:#660000;'>🔴 Critical — Follow-up Also Ignored ({len(critical_vessels)} vessels)</h3>
-        <p style='font-size:13px;color:#555;'>Follow-up was sent but still no data received. Further action required.</p>
-        <table style='width:100%;border-collapse:collapse;font-size:14px;'>
+        {section_header('#660000', 'Critical — Follow-up Also Ignored', len(critical_vessels),
+            'Follow-up was sent but still no data received. Further action required.')}
+        <table style='width:100%;border-collapse:collapse;font-size:14px;margin-bottom:24px;'>
             <tr style='background:#f5f5f5;'>
-                <th style='text-align:left;padding:8px;'>Responsible</th>
-                <th style='text-align:left;padding:8px;'>Vessel</th>
-                <th style='text-align:left;padding:8px;'>Days Since Follow-up Sent</th>
+                <th style='text-align:left;padding:8px;border-bottom:2px solid #ddd;'>Responsible</th>
+                <th style='text-align:left;padding:8px;border-bottom:2px solid #ddd;'>Vessel</th>
+                <th style='text-align:left;padding:8px;border-bottom:2px solid #ddd;'>Days Since Follow-up Sent</th>
             </tr>
             {vessel_rows(critical_vessels)}
         </table>
 
-        <br>
-        <p style='font-size:12px;color:#aaa;'>This is an automated message from the Marine Fluid Technology data tracking system.</p>
+        <p style='font-size:12px;color:#aaa;border-top:1px solid #eee;padding-top:12px;'>
+            This is an automated message from the Marine Fluid Technology data tracking system.
+        </p>
     </body>
     </html>
     """
@@ -178,7 +201,7 @@ def main():
             fd.last_followup_sent,
             fd.inaktiv_until,
             lv.responsible,
-            MAX(frd.report_date) AS last_data_received
+            MAX(frd.feedback_received_at) AS last_data_received
         FROM public.fb_dates fd
         LEFT JOIN public.legacy_vessels lv
             ON fd.vessel_name = lv.vessel_name
@@ -217,6 +240,22 @@ def main():
         last_followup = v["last_followup_sent"]
         inaktiv_until = v["inaktiv_until"]
         responsible   = v["responsible"] or "no contact"
+
+        # ----------------------------------------------------------
+        # Any status → aktiv
+        # New data received after the last outreach/followup
+        # ----------------------------------------------------------
+        if status in ('overdue', 'eskaleret', 'kritisk'):
+            if days_since_data is not None and days_since_data < 28:
+                cursor.execute("""
+                    UPDATE public.fb_dates
+                    SET status = 'aktiv', updated_at = NOW()
+                    WHERE vessel_name = %s
+                """, (vessel_name,))
+                status = "aktiv"
+                print(f"  → '{vessel_name}' moved back to aktiv (data received)")
+                continue  # No need to evaluate further for this vessel
+
 
         # Reactivate inactive vessels whose freeze period has ended
         if status == "inaktiv" and inaktiv_until and inaktiv_until <= now:
