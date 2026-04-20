@@ -13,6 +13,7 @@ CLIENT_ID     = os.environ["AZURE_CLIENT_ID"]
 CLIENT_SECRET = os.environ["AZURE_CLIENT_SECRET"]
 SENDER        = os.environ["CC_MAILBOX"]          # no_reply_mft@marinefluid.dk
 DATABASE_URL  = os.environ["DATABASE_URL"]
+DIGEST_RECIPIENT = os.environ["DIGEST_RECIPIENT"]
 
 # ---------------------------------------------------------------------------
 # BUSINESS DAY HELPERS
@@ -295,7 +296,7 @@ def main():
     if total == 0:
         print("  Nothing to report today.")
     else:
-        print(f"\n  Sending digest to mftservice@marinefluid.dk ({total} vessel(s))")
+        print(f"\n  Sending digest to {DIGEST_RECIPIENT} ({total} vessel(s))")
         html = build_digest_email(
             overdue_vessels=digest["overdue"],
             escalated_vessels=digest["escalated"],
@@ -303,7 +304,7 @@ def main():
         )
         send_email(
             token,
-            to_address="mftservice@marinefluid.dk",
+            to_address=DIGEST_RECIPIENT,
             subject=f"Daily Vessel Follow-up Digest — {now.strftime('%d %b %Y')}",
             html_body=html,
         )
