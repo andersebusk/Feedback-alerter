@@ -2,6 +2,7 @@ import os
 import requests
 import psycopg2
 import psycopg2.extras
+import mailbox_parser
 from datetime import datetime, timezone, timedelta
 
 # ---------------------------------------------------------------------------
@@ -12,17 +13,6 @@ CLIENT_ID     = os.environ["AZURE_CLIENT_ID"]
 CLIENT_SECRET = os.environ["AZURE_CLIENT_SECRET"]
 SENDER        = os.environ["CC_MAILBOX"]          # no_reply_mft@marinefluid.dk
 DATABASE_URL  = os.environ["DATABASE_URL"]
-
-# ---------------------------------------------------------------------------
-# RESPONSIBLE CODE → EMAIL MAPPING
-# ---------------------------------------------------------------------------
-RESPONSIBLE_MAP = {
-    "WBE": "william.benn@marinefluid.dk",
-    "SBO": "sebastian.boege@marinefluid.dk",
-    "TLC": "thomas.lundechristensen@marinefluid.dk",
-    "TAN": "thomas.andersen@marinefluid.dk",
-    "MFT Service": "mftservice@marinefluid.dk",
-}
 
 # ---------------------------------------------------------------------------
 # BUSINESS DAY HELPERS
@@ -95,7 +85,7 @@ def send_email(token, to_address, subject, html_body):
 # ---------------------------------------------------------------------------
 # BUILD EMAIL BODY
 # ---------------------------------------------------------------------------
-def build_digest_email(recipient_name, overdue_vessels, escalated_vessels, critical_vessels):
+def build_digest_email(overdue_vessels, escalated_vessels, critical_vessels):
     def vessel_rows(vessels):
         if not vessels:
             return "<tr><td colspan='3' style='color:#888;padding:8px;'>None</td></tr>"
@@ -103,9 +93,9 @@ def build_digest_email(recipient_name, overdue_vessels, escalated_vessels, criti
         for v in vessels:
             rows += f"""
             <tr>
+                <td style='padding:8px;border-bottom:1px solid #eee;'>{v['responsible']}</td>
                 <td style='padding:8px;border-bottom:1px solid #eee;'>{v['vessel_name']}</td>
-                <td style='padding:8px;border-bottom:1px solid #eee;'>{v['days_since']} days ago</td>
-                <td style='padding:8px;border-bottom:1px solid #eee;'>{v['note']}</td>
+                <td style='padding:8px;border-bottom:1px solid #eee;'>{v['days_since']} days</td>
             </tr>"""
         return rows
 
@@ -131,9 +121,9 @@ def build_digest_email(recipient_name, overdue_vessels, escalated_vessels, criti
         <p style='font-size:13px;color:#555;'>Outreach was sent but no data received within 3 business days.</p>
         <table style='width:100%;border-collapse:collapse;font-size:14px;'>
             <tr style='background:#f5f5f5;'>
+                <th style='text-align:left;padding:8px;'>Responsible</th>
                 <th style='text-align:left;padding:8px;'>Vessel</th>
-                <th style='text-align:left;padding:8px;'>Outreach Sent</th>
-                <th style='text-align:left;padding:8px;'>Note</th>
+                <th style='text-align:left;padding:8px;'>Days Since Outreach Sent</th>
             </tr>
             {vessel_rows(escalated_vessels)}
         </table>
@@ -143,9 +133,9 @@ def build_digest_email(recipient_name, overdue_vessels, escalated_vessels, criti
         <p style='font-size:13px;color:#555;'>Follow-up was sent but still no data received. Further action required.</p>
         <table style='width:100%;border-collapse:collapse;font-size:14px;'>
             <tr style='background:#f5f5f5;'>
+                <th style='text-align:left;padding:8px;'>Responsible</th>
                 <th style='text-align:left;padding:8px;'>Vessel</th>
-                <th style='text-align:left;padding:8px;'>Follow-up Sent</th>
-                <th style='text-align:left;padding:8px;'>Note</th>
+                <th style='text-align:left;padding:8px;'>Days Since Follow-up Sent</th>
             </tr>
             {vessel_rows(critical_vessels)}
         </table>
@@ -167,13 +157,17 @@ def main():
         print(f"[{now}] Weekend — skipping cron job.")
         return
 
+    # Run mailbox parser first so latest email dates are in the DB
+    print("Running mailbox parser...")
+    mailbox_parser.main()
+
     print(f"[{now}] Starting daily status evaluation...")
 
     conn = psycopg2.connect(DATABASE_URL)
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
     # ------------------------------------------------------------------
-    # Fetch all active vessels with their tracking data
+    # Fetch all vessels with their tracking data
     # ------------------------------------------------------------------
     cursor.execute("""
         SELECT
@@ -203,27 +197,25 @@ def main():
     print(f"  Found {len(vessels)} vessel(s) to evaluate")
 
     # ------------------------------------------------------------------
-    # Evaluate status transitions and bucket vessels per responsible
+    # Digest buckets — one list per status, all vessels in one email
     # ------------------------------------------------------------------
-    # Structure: { email_address: { "overdue": [], "escalated": [], "critical": [] } }
-   digest = {"overdue": [], "escalated": [], "critical": []}
+    digest = {"overdue": [], "escalated": [], "critical": []}
 
-    def add_to_digest(responsible, bucket, vessel_name, days_since, note):
+    def add_to_digest(responsible, bucket, vessel_name, days_since):
         digest[bucket].append({
             "vessel_name": vessel_name,
-            "days_since":  days_since,
-            "note":        note,
+            "days_since":  days_since if days_since is not None else "N/A",
             "responsible": responsible,
         })
 
     for v in vessels:
-        vessel_name       = v["vessel_name"]
-        status            = v["status"]
-        last_data         = v["last_data_received"]
-        last_outreach     = v["last_outreach_sent"]
-        last_followup     = v["last_followup_sent"]
-        inaktiv_until     = v["inaktiv_until"]
-        responsible       = v["responsible"] or "no contact"
+        vessel_name   = v["vessel_name"]
+        status        = v["status"]
+        last_data     = v["last_data_received"]
+        last_outreach = v["last_outreach_sent"]
+        last_followup = v["last_followup_sent"]
+        inaktiv_until = v["inaktiv_until"]
+        responsible   = v["responsible"] or "no contact"
 
         # Reactivate inactive vessels whose freeze period has ended
         if status == "inaktiv" and inaktiv_until and inaktiv_until <= now:
@@ -240,8 +232,8 @@ def main():
         days_since_followup = business_days_since(last_followup)
 
         # ----------------------------------------------------------
-        # STATUS: aktiv → overdue
-        # 28+ days since last data received, no outreach sent yet
+        # aktiv → overdue
+        # 28+ calendar days since last data, no outreach sent yet
         # ----------------------------------------------------------
         if status == "aktiv":
             if days_since_data is not None and days_since_data >= 28:
@@ -255,21 +247,10 @@ def main():
                     print(f"  → '{vessel_name}' moved to overdue")
 
         # ----------------------------------------------------------
-        # STATUS: overdue — remind daily until outreach is sent
+        # overdue — check if should escalate, otherwise remind
         # ----------------------------------------------------------
         if status == "overdue":
-            add_to_digest(
-                responsible, "overdue", vessel_name,
-                days_since_data,
-                "No outreach sent yet"
-            )
-
-        # ----------------------------------------------------------
-        # STATUS: overdue → eskaleret
-        # Outreach was sent, but no data received within 3 business days
-        # ----------------------------------------------------------
-        if status == "overdue" and last_outreach is not None:
-            if last_data is None or last_outreach > last_data:
+            if last_outreach is not None and (last_data is None or last_outreach > last_data):
                 if days_since_outreach is not None and days_since_outreach >= 3:
                     cursor.execute("""
                         UPDATE public.fb_dates
@@ -278,23 +259,14 @@ def main():
                     """, (vessel_name,))
                     status = "eskaleret"
                     print(f"  → '{vessel_name}' moved to eskaleret")
+            else:
+                add_to_digest(responsible, "overdue", vessel_name, days_since_data)
 
         # ----------------------------------------------------------
-        # STATUS: eskaleret — remind daily until follow-up is sent
+        # eskaleret — check if should go kritisk, otherwise remind
         # ----------------------------------------------------------
         if status == "eskaleret":
-            add_to_digest(
-                responsible, "escalated", vessel_name,
-                days_since_outreach,
-                "Awaiting follow-up email"
-            )
-
-        # ----------------------------------------------------------
-        # STATUS: eskaleret → kritisk
-        # Follow-up was sent, but no data received within 3 business days
-        # ----------------------------------------------------------
-        if status == "eskaleret" and last_followup is not None:
-            if last_data is None or last_followup > last_data:
+            if last_followup is not None and (last_data is None or last_followup > last_data):
                 if days_since_followup is not None and days_since_followup >= 3:
                     cursor.execute("""
                         UPDATE public.fb_dates
@@ -303,26 +275,23 @@ def main():
                     """, (vessel_name,))
                     status = "kritisk"
                     print(f"  → '{vessel_name}' moved to kritisk")
+            else:
+                add_to_digest(responsible, "escalated", vessel_name, days_since_outreach)
 
         # ----------------------------------------------------------
-        # STATUS: kritisk — flag daily for manual action
+        # kritisk — flag daily for manual action
         # ----------------------------------------------------------
         if status == "kritisk":
-            add_to_digest(
-                responsible, "critical", vessel_name,
-                days_since_followup,
-                "Further action required"
-            )
+            add_to_digest(responsible, "critical", vessel_name, days_since_followup)
 
     conn.commit()
 
     # ------------------------------------------------------------------
-    # Send digest emails
+    # Send single digest email to mftservice
     # ------------------------------------------------------------------
     token = get_access_token()
 
-    for email, buckets in digest.items():
-        total = sum(len(b) for b in digest.values())
+    total = sum(len(b) for b in digest.values())
     if total == 0:
         print("  Nothing to report today.")
     else:
