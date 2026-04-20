@@ -94,16 +94,25 @@ def send_email(token, to_address, subject, html_body):
 # BUILD EMAIL BODY
 # ---------------------------------------------------------------------------
 def build_digest_email(overdue_vessels, escalated_vessels, critical_vessels):
-    def vessel_rows(vessels):
+    def vessel_rows(vessels, mail_type):
         if not vessels:
-            return "<tr><td colspan='3' style='color:#888;padding:8px;'>None</td></tr>"
+            return "<tr><td colspan='4' style='color:#888;padding:8px;'>None</td></tr>"
         rows = ""
         for v in vessels:
+            subject = f"[{mail_type}] {v['vessel_name']}"
+            mailto = f"mailto:?subject={subject.replace(' ', '%20')}"
             rows += f"""
             <tr>
                 <td style='padding:8px;border-bottom:1px solid #eee;'>{v['responsible']}</td>
                 <td style='padding:8px;border-bottom:1px solid #eee;'>{v['vessel_name']}</td>
                 <td style='padding:8px;border-bottom:1px solid #eee;'>{v['days_since']} days</td>
+                <td style='padding:8px;border-bottom:1px solid #eee;'>
+                    <a href='{mailto}'
+                       style='background:#003366;color:white;padding:4px 10px;
+                              border-radius:4px;text-decoration:none;font-size:12px;'>
+                        Send Email
+                    </a>
+                </td>
             </tr>"""
         return rows
 
@@ -111,9 +120,7 @@ def build_digest_email(overdue_vessels, escalated_vessels, critical_vessels):
         return f"""
         <table style='width:100%;border-collapse:collapse;margin-bottom:4px;'>
             <tr>
-                <td style='width:14px;'>
-                    <div style='width:12px;height:12px;background:{color};border-radius:2px;'></div>
-                </td>
+                <td style='width:12px;background:{color};'>&nbsp;</td>
                 <td style='padding-left:8px;'>
                     <span style='font-size:16px;font-weight:bold;color:{color};'>{title} ({count} vessels)</span>
                 </td>
@@ -134,7 +141,7 @@ def build_digest_email(overdue_vessels, escalated_vessels, critical_vessels):
     <html>
     <body style='font-family:Arial,sans-serif;color:#333;max-width:700px;margin:0 auto;padding:20px;'>
         <h2 style='color:#003366;border-bottom:2px solid #003366;padding-bottom:8px;'>
-            Daily Vessel Follow-up Digest
+            Daily Vessel Follow-up
         </h2>
         <p>Good morning,<br>Here is your daily summary of vessels requiring attention.</p>
 
@@ -145,8 +152,9 @@ def build_digest_email(overdue_vessels, escalated_vessels, critical_vessels):
                 <th style='text-align:left;padding:8px;border-bottom:2px solid #ddd;'>Responsible</th>
                 <th style='text-align:left;padding:8px;border-bottom:2px solid #ddd;'>Vessel</th>
                 <th style='text-align:left;padding:8px;border-bottom:2px solid #ddd;'>Days Since Last Feedback</th>
+                <th style='text-align:left;padding:8px;border-bottom:2px solid #ddd;'>Action</th>
             </tr>
-            {vessel_rows(overdue_vessels)}
+            {vessel_rows(overdue_vessels, 'DATA REQUEST')}
         </table>
 
         {section_header('#e68a00', 'Escalated — No Response to Outreach', len(escalated_vessels),
@@ -156,8 +164,9 @@ def build_digest_email(overdue_vessels, escalated_vessels, critical_vessels):
                 <th style='text-align:left;padding:8px;border-bottom:2px solid #ddd;'>Responsible</th>
                 <th style='text-align:left;padding:8px;border-bottom:2px solid #ddd;'>Vessel</th>
                 <th style='text-align:left;padding:8px;border-bottom:2px solid #ddd;'>Days Since Outreach Sent</th>
+                <th style='text-align:left;padding:8px;border-bottom:2px solid #ddd;'>Action</th>
             </tr>
-            {vessel_rows(escalated_vessels)}
+            {vessel_rows(escalated_vessels, 'FOLLOW-UP')}
         </table>
         {inactive_link}
         <br>
@@ -169,8 +178,9 @@ def build_digest_email(overdue_vessels, escalated_vessels, critical_vessels):
                 <th style='text-align:left;padding:8px;border-bottom:2px solid #ddd;'>Responsible</th>
                 <th style='text-align:left;padding:8px;border-bottom:2px solid #ddd;'>Vessel</th>
                 <th style='text-align:left;padding:8px;border-bottom:2px solid #ddd;'>Days Since Follow-up Sent</th>
+                <th style='text-align:left;padding:8px;border-bottom:2px solid #ddd;'>Action</th>
             </tr>
-            {vessel_rows(critical_vessels)}
+            {vessel_rows(critical_vessels, 'FOLLOW-UP')}
         </table>
         {inactive_link}
         <br>
