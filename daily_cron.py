@@ -346,13 +346,13 @@ def main():
         LEFT JOIN (
             SELECT vessel_name, MAX(feedback_received_at) AS last_data_received
             FROM (
-                SELECT vessel_name, feedback_received_at FROM public.fb_report_data
+                SELECT vessel_name, feedback_received_at FROM public.fb_report_data  WHERE is_deleted IS NOT TRUE
                 UNION ALL
-                SELECT vessel_name, feedback_received_at FROM public.scrape_lab
+                SELECT vessel_name, feedback_received_at FROM public.scrape_lab      WHERE is_deleted IS NOT TRUE
                 UNION ALL
-                SELECT vessel_name, feedback_received_at FROM public.me_sys_data
+                SELECT vessel_name, feedback_received_at FROM public.me_sys_data     WHERE is_deleted IS NOT TRUE
                 UNION ALL
-                SELECT vessel_name, feedback_received_at FROM public.scavenge_data
+                SELECT vessel_name, feedback_received_at FROM public.scavenge_data   WHERE is_deleted IS NOT TRUE
             ) all_data
             GROUP BY vessel_name
         ) latest_data ON fd.vessel_name = latest_data.vessel_name
