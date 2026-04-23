@@ -236,8 +236,9 @@ def main():
             ON fd.vessel_name = lv.vessel_name
         LEFT JOIN public.fb_report_data frd
             ON fd.vessel_name = frd.vessel_name
-        WHERE fd.status != 'inaktiv'
-           OR (fd.status = 'inaktiv' AND fd.inaktiv_until <= NOW())
+        WHERE lv.priority = 1
+          AND (fd.status != 'inaktiv'
+           OR (fd.status = 'inaktiv' AND fd.inaktiv_until <= NOW()))
         GROUP BY
             fd.vessel_name,
             fd.status,
