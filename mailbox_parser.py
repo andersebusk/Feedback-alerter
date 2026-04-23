@@ -20,9 +20,9 @@ FAILED_MAIL   = os.environ["FAILED_MAIL"]          # recipient for failed-parse 
 # SUBJECT LINE PATTERNS
 # ---------------------------------------------------------------------------
 PATTERNS = {
-    "DATA REQUEST": re.compile(r"^\[DATA REQUEST\]\s+(.+)$", re.IGNORECASE),
-    "FOLLOW-UP":    re.compile(r"^\[FOLLOW-UP\]\s+(.+)$",    re.IGNORECASE),
-    "FB REPORT":    re.compile(r"^\[FB REPORT\]\s+(.+)$",    re.IGNORECASE),
+    "DATA REQUEST": re.compile(r"^\[Data request\s*–\s*(.+)\]$",    re.IGNORECASE),
+    "FOLLOW-UP":    re.compile(r"^\[Follow up\s*–\s*(.+)\]$",        re.IGNORECASE),
+    "FB REPORT":    re.compile(r"^\[Feedback report\s*–\s*(.+)\]$",  re.IGNORECASE),
 }
 
 # ---------------------------------------------------------------------------

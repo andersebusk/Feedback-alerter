@@ -1,9 +1,10 @@
-import os
+﻿import os
 import requests
 import psycopg2
 import psycopg2.extras
 import mailbox_parser
 from datetime import datetime, timezone, timedelta
+from urllib.parse import quote
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -17,6 +18,25 @@ SENDER        = os.environ["CC_MAILBOX"]          # no_reply_mft@marinefluid.dk
 DATABASE_URL  = os.environ["DATABASE_URL"]
 DIGEST_RECIPIENT = os.environ["DIGEST_RECIPIENT"]
 APP_BASE_URL     = os.environ["APP_BASE_URL"]        # e.g. https://feedback-report-generator.onrender.com
+# ---------------------------------------------------------------------------
+# CUSTOMER OUTREACH CONFIG
+# To activate a customer: add vessel names to their list below.
+# Chief engineer name and email are read per vessel from legacy_vessels
+# (columns: chief_engineer_name, chief_engineer_email).
+# Customers with no vessels listed, or vessels missing chief engineer data,
+# are silently skipped.
+# ---------------------------------------------------------------------------
+CUSTOMER_OUTREACH = {
+    "MSC": {
+        "vessels": [
+            # Add MSC vessel names here once legacy_vessels has the data, e.g.:
+            # "MSC VESSEL NAME",
+        ],
+    },
+    # "NEXT CUSTOMER": {
+    #     "vessels": ["VESSEL A", "VESSEL B"],
+    # },
+}
 
 # ---------------------------------------------------------------------------
 # BUSINESS DAY HELPERS
@@ -92,6 +112,39 @@ def send_email(token, to_address, subject, html_body):
     print(f"  → Email sent to {to_address}")
 
 # ---------------------------------------------------------------------------
+# MAILTO LINK BUILDERS
+# ---------------------------------------------------------------------------
+_DATA_REQUEST_BODY = (
+    "Dear Chief Engineer,\n \n"
+    "I hope this message finds you well. As part of our ongoing data feedback service, "
+    "we are now due to receive the next set of operational data for the above vessel. "
+    "This information is essential for us to provide you with accurate, vessel-specific "
+    "recommendations on cylinder condition, lube oil feed rates, and overall engine performance.\n \n"
+    "We kindly request the following items by:\n \n"
+    "• Completed feedback sheet (see attached form)\n"
+    "• Most recent scavenge port inspection report\n"
+    "• Recent crankcase photos\n"
+    "• Updated lube oil analysis reports\n \n"
+    "Each report we produce is tailored to your engine’s operating profile. "
+    "The more complete and timelier the data, the more precise our recommendations.\n \n"
+    "Your ongoing cooperation is greatly appreciated. Please feel free to reach out with "
+    "any questions or if any of the above items are unavailable.\n \n"
+    "Thank you in advance and wishing you a safe and efficient onward voyage."
+)
+
+def make_data_request_mailto(vessel_name):
+    subject = quote(f"[Data request – {vessel_name}]")
+    bcc     = quote(SENDER)
+    body    = quote(_DATA_REQUEST_BODY)
+    return f"mailto:?subject={subject}&bcc={bcc}&body={body}"
+
+def make_followup_mailto(vessel_name):
+    # TODO: replace with follow-up template when available
+    subject = quote(f"[Follow up – {vessel_name}]")
+    bcc     = quote(SENDER)
+    return f"mailto:?subject={subject}&bcc={bcc}"
+
+# ---------------------------------------------------------------------------
 # BUILD EMAIL BODY
 # ---------------------------------------------------------------------------
 def build_digest_email(overdue_vessels, escalated_vessels, critical_vessels):
@@ -100,8 +153,12 @@ def build_digest_email(overdue_vessels, escalated_vessels, critical_vessels):
             return "<tr><td colspan='4' style='color:#888;padding:8px;'>None</td></tr>"
         rows = ""
         for v in vessels:
-            subject = f"[{mail_type}] {v['vessel_name']}"
-            mailto = f"mailto:?subject={subject.replace(' ', '%20')}"
+            if mail_type == "DATA REQUEST":
+                mailto = make_data_request_mailto(v["vessel_name"])
+            elif mail_type == "FOLLOW-UP":
+                mailto = make_followup_mailto(v["vessel_name"])
+            else:
+                mailto = f"mailto:?subject={quote('[' + mail_type + '] ' + v['vessel_name'])}"
             rows += f"""
             <tr>
                 <td style='padding:8px;border-bottom:1px solid #eee;'>{v['responsible']}</td>
@@ -200,6 +257,56 @@ def build_digest_email(overdue_vessels, escalated_vessels, critical_vessels):
     """
 
 # ---------------------------------------------------------------------------
+# CUSTOMER OUTREACH EMAILS
+# Replace the body strings below with the actual templates when available.
+# ---------------------------------------------------------------------------
+def build_customer_overdue_email(vessel_name, chief_engineer_name):
+    # TODO: replace with actual overdue template
+    return f"<p>Placeholder: data request for <strong>{vessel_name}</strong> (attn. {chief_engineer_name}).</p>"
+
+def build_customer_followup_email(vessel_name, chief_engineer_name):
+    # TODO: replace with actual follow-up template
+    return f"<p>Placeholder: follow-up for <strong>{vessel_name}</strong> (attn. {chief_engineer_name}).</p>"
+
+def send_customer_outreach_emails(token, overdue_vessels, escalated_vessels):
+    for customer, config in CUSTOMER_OUTREACH.items():
+        customer_vessels = set(config["vessels"])
+
+        if not customer_vessels:
+            print(f"  -> Customer '{customer}' skipped (no vessels configured)")
+            continue
+
+        for v in overdue_vessels:
+            if v["vessel_name"] not in customer_vessels:
+                continue
+            contact = v["chief_engineer_email"]
+            if not contact:
+                print(f"  -> '{v['vessel_name']}' skipped (no chief engineer email in DB)")
+                continue
+            send_email(
+                token,
+                to_address=contact,
+                subject=f"[DATA REQUEST] {v['vessel_name']}",
+                html_body=build_customer_overdue_email(v["vessel_name"], v["chief_engineer_name"]),
+            )
+            print(f"  -> Customer overdue mail sent to {customer} ({contact}) for '{v['vessel_name']}'")
+
+        for v in escalated_vessels:
+            if v["vessel_name"] not in customer_vessels:
+                continue
+            contact = v["chief_engineer_email"]
+            if not contact:
+                print(f"  -> '{v['vessel_name']}' skipped (no chief engineer email in DB)")
+                continue
+            send_email(
+                token,
+                to_address=contact,
+                subject=f"[FOLLOW-UP] {v['vessel_name']}",
+                html_body=build_customer_followup_email(v["vessel_name"], v["chief_engineer_name"]),
+            )
+            print(f"  -> Customer follow-up mail sent to {customer} ({contact}) for '{v['vessel_name']}'")
+
+# ---------------------------------------------------------------------------
 # MAIN LOGIC
 # ---------------------------------------------------------------------------
 def main():
@@ -211,8 +318,8 @@ def main():
         return
 
     # Run mailbox parser first so latest email dates are in the DB
-    # print("Running mailbox parser...")
-    # mailbox_parser.main()
+    print("Running mailbox parser...")
+    mailbox_parser.main()
 
     print(f"[{now}] Starting daily status evaluation...")
 
@@ -230,22 +337,28 @@ def main():
             fd.last_followup_sent,
             fd.inaktiv_until,
             lv.responsible,
-            MAX(frd.feedback_received_at) AS last_data_received
+            lv.chief_engineer_name,
+            lv.chief_engineer_email,
+            latest_data.last_data_received
         FROM public.fb_dates fd
         LEFT JOIN public.legacy_vessels lv
             ON fd.vessel_name = lv.vessel_name
-        LEFT JOIN public.fb_report_data frd
-            ON fd.vessel_name = frd.vessel_name
+        LEFT JOIN (
+            SELECT vessel_name, MAX(feedback_received_at) AS last_data_received
+            FROM (
+                SELECT vessel_name, feedback_received_at FROM public.fb_report_data
+                UNION ALL
+                SELECT vessel_name, feedback_received_at FROM public.scrape_lab
+                UNION ALL
+                SELECT vessel_name, feedback_received_at FROM public.me_sys_data
+                UNION ALL
+                SELECT vessel_name, feedback_received_at FROM public.scavenge_data
+            ) all_data
+            GROUP BY vessel_name
+        ) latest_data ON fd.vessel_name = latest_data.vessel_name
         WHERE lv.priority = 1
           AND (fd.status != 'inaktiv'
            OR (fd.status = 'inaktiv' AND fd.inaktiv_until <= NOW()))
-        GROUP BY
-            fd.vessel_name,
-            fd.status,
-            fd.last_outreach_sent,
-            fd.last_followup_sent,
-            fd.inaktiv_until,
-            lv.responsible
     """)
     vessels = cursor.fetchall()
     print(f"  Found {len(vessels)} vessel(s) to evaluate")
@@ -255,11 +368,13 @@ def main():
     # ------------------------------------------------------------------
     digest = {"overdue": [], "escalated": [], "critical": []}
 
-    def add_to_digest(responsible, bucket, vessel_name, days_since):
+    def add_to_digest(responsible, bucket, vessel_name, days_since, chief_engineer_name=None, chief_engineer_email=None):
         digest[bucket].append({
-            "vessel_name": vessel_name,
-            "days_since":  days_since if days_since is not None else "N/A",
-            "responsible": responsible,
+            "vessel_name":           vessel_name,
+            "days_since":            days_since if days_since is not None else "N/A",
+            "responsible":           responsible,
+            "chief_engineer_name":   chief_engineer_name,
+            "chief_engineer_email":  chief_engineer_email,
         })
 
     for v in vessels:
@@ -269,7 +384,9 @@ def main():
         last_outreach = v["last_outreach_sent"]
         last_followup = v["last_followup_sent"]
         inaktiv_until = v["inaktiv_until"]
-        responsible   = v["responsible"] or "no contact"
+        responsible          = v["responsible"] or "no contact"
+        chief_engineer_name  = v["chief_engineer_name"]
+        chief_engineer_email = v["chief_engineer_email"]
 
         days_since_data     = calendar_days_since(last_data)
         days_since_outreach = business_days_since(last_outreach)
@@ -329,7 +446,7 @@ def main():
                     status = "eskaleret"
                     print(f"  → '{vessel_name}' moved to eskaleret")
             else:
-                add_to_digest(responsible, "overdue", vessel_name, days_since_data)
+                add_to_digest(responsible, "overdue", vessel_name, days_since_data, chief_engineer_name, chief_engineer_email)
 
         # ----------------------------------------------------------
         # eskaleret — check if should go kritisk, otherwise remind
@@ -345,13 +462,13 @@ def main():
                     status = "kritisk"
                     print(f"  → '{vessel_name}' moved to kritisk")
             else:
-                add_to_digest(responsible, "escalated", vessel_name, days_since_outreach)
+                add_to_digest(responsible, "escalated", vessel_name, days_since_outreach, chief_engineer_name, chief_engineer_email)
 
         # ----------------------------------------------------------
         # kritisk — flag daily for manual action
         # ----------------------------------------------------------
         if status == "kritisk":
-            add_to_digest(responsible, "critical", vessel_name, days_since_followup)
+            add_to_digest(responsible, "critical", vessel_name, days_since_followup, chief_engineer_name, chief_engineer_email)
 
     conn.commit()
 
@@ -376,6 +493,8 @@ def main():
             subject=f"Daily Vessel Follow-up Digest — {now.strftime('%d %b %Y')}",
             html_body=html,
         )
+
+    send_customer_outreach_emails(token, digest["overdue"], digest["escalated"])
 
     cursor.close()
     conn.close()
