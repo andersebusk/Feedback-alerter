@@ -14,6 +14,7 @@ CLIENT_ID     = os.environ["AZURE_CLIENT_ID"]
 CLIENT_SECRET = os.environ["AZURE_CLIENT_SECRET"]
 MAILBOX       = os.environ["CC_MAILBOX"]          # e.g. no_reply_mft@marinefluid.dk
 DATABASE_URL  = os.environ["DATABASE_URL"]         # PostgreSQL connection string
+FAILED_MAIL   = os.environ["FAILED_MAIL"]          # recipient for failed-parse alerts
 
 # ---------------------------------------------------------------------------
 # SUBJECT LINE PATTERNS
@@ -46,7 +47,7 @@ def fetch_unread_emails(token):
     url = (
         f"https://graph.microsoft.com/v1.0/users/{MAILBOX}/mailFolders/inbox/messages"
         f"?$filter=isRead eq false"
-        f"&$select=id,subject,receivedDateTime"
+        f"&$select=id,subject,receivedDateTime,from"
         f"&$top=50"
     )
     headers = {"Authorization": f"Bearer {token}"}
@@ -79,42 +80,83 @@ def parse_subject(subject):
 # ---------------------------------------------------------------------------
 # STEP 5: Upsert into fb_dates
 # ---------------------------------------------------------------------------
-def upsert_fb_dates(cursor, email_type, vessel_name, received_at):
+def upsert_fb_dates(cursor, email_type, vessel_name, received_at, sender):
     if email_type == "DATA REQUEST":
         sql = """
-            INSERT INTO public.fb_dates (vessel_name, last_outreach_sent, updated_at)
-            VALUES (%s, %s, NOW())
+            INSERT INTO public.fb_dates (vessel_name, last_outreach_sent, updated_at, updated_by)
+            VALUES (%s, %s, NOW(), %s)
             ON CONFLICT (vessel_name)
             DO UPDATE SET
                 last_outreach_sent = EXCLUDED.last_outreach_sent,
-                updated_at = NOW();
+                updated_at = NOW(),
+                updated_by = EXCLUDED.updated_by;
         """
-        cursor.execute(sql, (vessel_name, received_at))
+        cursor.execute(sql, (vessel_name, received_at, sender))
         print(f"  → Updated last_outreach_sent for '{vessel_name}'")
 
     elif email_type == "FOLLOW-UP":
         sql = """
-            INSERT INTO public.fb_dates (vessel_name, last_followup_sent, updated_at)
-            VALUES (%s, %s, NOW())
+            INSERT INTO public.fb_dates (vessel_name, last_followup_sent, updated_at, updated_by)
+            VALUES (%s, %s, NOW(), %s)
             ON CONFLICT (vessel_name)
             DO UPDATE SET
                 last_followup_sent = EXCLUDED.last_followup_sent,
-                updated_at = NOW();
+                updated_at = NOW(),
+                updated_by = EXCLUDED.updated_by;
         """
-        cursor.execute(sql, (vessel_name, received_at))
+        cursor.execute(sql, (vessel_name, received_at, sender))
         print(f"  → Updated last_followup_sent for '{vessel_name}'")
 
     elif email_type == "FB REPORT":
         sql = """
-            INSERT INTO public.fb_dates (vessel_name, last_report_sent, updated_at)
-            VALUES (%s, %s, NOW())
+            INSERT INTO public.fb_dates (vessel_name, last_report_sent, updated_at, updated_by)
+            VALUES (%s, %s, NOW(), %s)
             ON CONFLICT (vessel_name)
             DO UPDATE SET
                 last_report_sent = EXCLUDED.last_report_sent,
-                updated_at = NOW();
+                updated_at = NOW(),
+                updated_by = EXCLUDED.updated_by;
         """
-        cursor.execute(sql, (vessel_name, received_at))
+        cursor.execute(sql, (vessel_name, received_at, sender))
         print(f"  → Updated last_report_sent for '{vessel_name}'")
+
+# ---------------------------------------------------------------------------
+# STEP 6: Send alert email for emails that could not be parsed
+# ---------------------------------------------------------------------------
+def send_failure_alert(token, failed_emails):
+    rows = "".join(
+        f"<tr><td style='padding:4px 12px 4px 0'>{e['received']}</td>"
+        f"<td style='padding:4px 12px 4px 0'>{e['sender']}</td>"
+        f"<td style='padding:4px 0'>{e['subject']}</td></tr>"
+        for e in failed_emails
+    )
+    body = f"""
+    <p>The mailbox parser ran and could not match the following email(s) to any known pattern:</p>
+    <table style='border-collapse:collapse;font-family:monospace;font-size:13px'>
+      <thead>
+        <tr>
+          <th style='text-align:left;padding:4px 12px 4px 0'>Received</th>
+          <th style='text-align:left;padding:4px 12px 4px 0'>Sender</th>
+          <th style='text-align:left;padding:4px 0'>Subject</th>
+        </tr>
+      </thead>
+      <tbody>{rows}</tbody>
+    </table>
+    <p>These emails have been marked as read and were not written to the database.</p>
+    """
+    payload = {
+        "message": {
+            "subject": f"[Mailbox Parser] {len(failed_emails)} unmatched email(s)",
+            "body": {"contentType": "HTML", "content": body},
+            "toRecipients": [{"emailAddress": {"address": FAILED_MAIL}}],
+        },
+        "saveToSentItems": False,
+    }
+    url = f"https://graph.microsoft.com/v1.0/users/{MAILBOX}/sendMail"
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    response = requests.post(url, headers=headers, json=payload)
+    response.raise_for_status()
+    print(f"  → Failure alert sent to {FAILED_MAIL}")
 
 # ---------------------------------------------------------------------------
 # MAIN
@@ -133,16 +175,24 @@ def main():
     conn = psycopg2.connect(DATABASE_URL)
     cursor = conn.cursor()
 
+    failed_emails = []
+
     for email in emails:
         subject     = email.get("subject", "")
         message_id  = email["id"]
         received_at = email["receivedDateTime"]  # ISO 8601 string
+        sender      = email.get("from", {}).get("emailAddress", {}).get("address", "unknown")
 
         print(f"\n  Processing: '{subject}'")
 
         parsed = parse_subject(subject)
         if not parsed:
             print(f"  → Subject did not match any pattern, skipping")
+            failed_emails.append({
+                "subject":  subject,
+                "sender":   sender,
+                "received": received_at,
+            })
             mark_as_read(token, message_id)
             continue
 
@@ -167,12 +217,16 @@ def main():
                 mark_as_read(token, message_id)
                 continue
 
-        upsert_fb_dates(cursor, email_type, vessel_name, received_at)
+        upsert_fb_dates(cursor, email_type, vessel_name, received_at, sender)
         mark_as_read(token, message_id)
 
     conn.commit()
     cursor.close()
     conn.close()
+
+    if failed_emails:
+        send_failure_alert(token, failed_emails)
+
     print(f"\n[{datetime.now()}] Parser finished.")
 
 if __name__ == "__main__":

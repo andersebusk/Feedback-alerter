@@ -5,7 +5,7 @@ import psycopg2.extras
 # ---------------------------------------------------------------------------
 # CONFIG
 # ---------------------------------------------------------------------------
-DATABASE_URL = "postgresql://mft_service:zlS5B67k3bdxFcK5TDatLpr6KFS5tsL9@dpg-d6c6c2rnv86c73cs33m0-a.frankfurt-postgres.render.com/mft_data_db"
+DATABASE_URL  = os.environ["DATABASE_URL"]
 
 # ---------------------------------------------------------------------------
 # MAIN
