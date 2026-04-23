@@ -269,6 +269,10 @@ def main():
         inaktiv_until = v["inaktiv_until"]
         responsible   = v["responsible"] or "no contact"
 
+        days_since_data     = calendar_days_since(last_data)
+        days_since_outreach = business_days_since(last_outreach)
+        days_since_followup = business_days_since(last_followup)
+
         # ----------------------------------------------------------
         # Any status → aktiv
         # New data received after the last outreach/followup
@@ -284,7 +288,6 @@ def main():
                 print(f"  → '{vessel_name}' moved back to aktiv (data received)")
                 continue  # No need to evaluate further for this vessel
 
-
         # Reactivate inactive vessels whose freeze period has ended
         if status == "inaktiv" and inaktiv_until and inaktiv_until <= now:
             cursor.execute("""
@@ -294,10 +297,6 @@ def main():
             """, (vessel_name,))
             print(f"  → '{vessel_name}' reactivated after inactive period")
             status = "aktiv"
-
-        days_since_data     = calendar_days_since(last_data)
-        days_since_outreach = business_days_since(last_outreach)
-        days_since_followup = business_days_since(last_followup)
 
         # ----------------------------------------------------------
         # aktiv → overdue
