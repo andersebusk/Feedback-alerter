@@ -16,6 +16,7 @@ CLIENT_SECRET = os.environ["AZURE_CLIENT_SECRET"]
 SENDER        = os.environ["CC_MAILBOX"]          # no_reply_mft@marinefluid.dk
 DATABASE_URL  = os.environ["DATABASE_URL"]
 DIGEST_RECIPIENT = os.environ["DIGEST_RECIPIENT"]
+APP_BASE_URL     = os.environ["APP_BASE_URL"]        # e.g. https://feedback-report-generator.onrender.com
 
 # ---------------------------------------------------------------------------
 # BUSINESS DAY HELPERS
@@ -129,10 +130,10 @@ def build_digest_email(overdue_vessels, escalated_vessels, critical_vessels):
         <p style='font-size:13px;color:#555;margin-top:2px;'>{description}</p>
         """
 
-    inactive_link = """
+    inactive_link = f"""
         <p style='font-size:13px;color:#555;margin-top:8px;'>
             Do you want to change any of these vessels to inactive?
-            <a href='https://feedback-report-generator.onrender.com/vessel-inactive'
+            <a href='{APP_BASE_URL}/vessel-inactive'
                style='color:#003366;'>Use the following link</a>.
         </p>
     """
@@ -187,7 +188,7 @@ def build_digest_email(overdue_vessels, escalated_vessels, critical_vessels):
 
         <p style='font-size:13px;color:#555;'>
             You can see a full overview of all vessels here:
-            <a href='https://feedback-report-generator.onrender.com/vessel-overview'
+            <a href='{APP_BASE_URL}/vessel-overview'
                style='color:#003366;'>Vessel Overview</a>
         </p>
 
