@@ -366,9 +366,9 @@ def main():
     else:
         print(f"\n  Sending digest to {DIGEST_RECIPIENT} ({total} vessel(s))")
         html = build_digest_email(
-            overdue_vessels=digest["overdue"],
-            escalated_vessels=digest["escalated"],
-            critical_vessels=digest["critical"],
+            overdue_vessels=sorted(digest["overdue"], key=lambda v: v["responsible"]),
+            escalated_vessels=sorted(digest["escalated"], key=lambda v: v["responsible"]),
+            critical_vessels=sorted(digest["critical"], key=lambda v: v["responsible"]),
         )
         send_email(
             token,
