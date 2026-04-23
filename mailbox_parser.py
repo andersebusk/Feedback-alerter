@@ -199,23 +199,15 @@ def main():
         email_type, vessel_name = parsed
         print(f"  → Type: {email_type} | Vessel: {vessel_name}")
 
-        # Check vessel exists in fb_dates or other tables
+        # Check vessel exists in fb_dates
         cursor.execute(
             "SELECT vessel_name FROM public.fb_dates WHERE vessel_name = %s",
             (vessel_name,)
         )
-        existing = cursor.fetchone()
-        if not existing:
-            # Check if vessel exists in your main data table
-            cursor.execute(
-                "SELECT vessel_name FROM public.fb_report_data WHERE vessel_name = %s LIMIT 1",
-                (vessel_name,)
-            )
-            known_vessel = cursor.fetchone()
-            if not known_vessel:
-                print(f"  → WARNING: Vessel '{vessel_name}' not found in DB — skipping")
-                mark_as_read(token, message_id)
-                continue
+        if not cursor.fetchone():
+            print(f"  → WARNING: Vessel '{vessel_name}' not found in fb_dates — skipping")
+            mark_as_read(token, message_id)
+            continue
 
         upsert_fb_dates(cursor, email_type, vessel_name, received_at, sender)
         mark_as_read(token, message_id)
