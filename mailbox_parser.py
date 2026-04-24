@@ -20,9 +20,9 @@ FAILED_MAIL   = os.environ["FAILED_MAIL"]          # recipient for failed-parse 
 # SUBJECT LINE PATTERNS
 # ---------------------------------------------------------------------------
 PATTERNS = {
-    "DATA REQUEST": re.compile(r"^\[Data request\s*–\s*(.+)\]$",    re.IGNORECASE),
-    "FOLLOW-UP":    re.compile(r"^\[Follow up\s*–\s*(.+)\]$",        re.IGNORECASE),
-    "FB REPORT":    re.compile(r"^\[Feedback report\s*–\s*(.+)\]$",  re.IGNORECASE),
+    "DATA REQUEST": re.compile(r"\[Data request\s*–\s*([^\]]+)\]",    re.IGNORECASE),
+    "FOLLOW-UP":    re.compile(r"\[Follow up\s*–\s*([^\]]+)\]",        re.IGNORECASE),
+    "FB REPORT":    re.compile(r"\[Feedback report\s*–\s*([^\]]+)\]",  re.IGNORECASE),
 }
 
 # ---------------------------------------------------------------------------
@@ -71,7 +71,7 @@ def mark_as_read(token, message_id):
 # ---------------------------------------------------------------------------
 def parse_subject(subject):
     for email_type, pattern in PATTERNS.items():
-        match = pattern.match(subject.strip())
+        match = pattern.search(subject.strip())
         if match:
             vessel_name = match.group(1).strip()
             return email_type, vessel_name
